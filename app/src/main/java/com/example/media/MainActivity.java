@@ -1,45 +1,57 @@
 package com.example.media;
 
-import android.Manifest;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
+import android.util.Patterns;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.MediaController;
 import android.widget.Toast;
 import android.widget.VideoView;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-
-import java.io.IOException;
 
 public class MainActivity extends AppCompatActivity {
-
-    private static final int PICK_AUDIO_REQUEST = 1;
-    private static final int PERMISSION_REQUEST_CODE = 100;
 
     private VideoView videoView;
     private MediaPlayer mediaPlayer;
     private EditText urlEditText;
-    private Uri audioUri;
-    private boolean isVideo = false;
+
+    private boolean isVideoPlaying = false;
+
+    private final ActivityResultLauncher<String> filePicker =
+            registerForActivityResult(
+                    new ActivityResultContracts.GetContent(),
+                    this::handleSelectedFile
+            );
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        initializeViews();
+        setupVideoController();
+        setupButtons();
+    }
+
+    private void initializeViews() {
         videoView = findViewById(R.id.videoView);
         urlEditText = findViewById(R.id.urlEditText);
+    }
+
+    private void setupVideoController() {
+        MediaController controller = new MediaController(this);
+        controller.setAnchorView(videoView);
+        videoView.setMediaController(controller);
+    }
+
+    private void setupButtons() {
+
         Button btnOpenFile = findViewById(R.id.btnOpenFile);
         Button btnOpenUrl = findViewById(R.id.btnOpenUrl);
         Button btnPlay = findViewById(R.id.btnPlay);
@@ -47,139 +59,125 @@ public class MainActivity extends AppCompatActivity {
         Button btnStop = findViewById(R.id.btnStop);
         Button btnRestart = findViewById(R.id.btnRestart);
 
-        MediaController mediaController = new MediaController(this);
-        mediaController.setAnchorView(videoView);
-        videoView.setMediaController(mediaController);
-
-        btnOpenFile.setOnClickListener(v -> {
-            if (checkPermission()) {
-                openFilePicker();
-            } else {
-                requestPermission();
-            }
-        });
+        btnOpenFile.setOnClickListener(v ->
+                filePicker.launch("*/*"));
 
         btnOpenUrl.setOnClickListener(v -> {
-            String url = urlEditText.getText().toString();
-            if (!url.isEmpty()) {
-                playVideo(Uri.parse(url));
-            } else {
-                Toast.makeText(this, "Please enter a URL", Toast.LENGTH_SHORT).show();
+            String url = urlEditText.getText().toString().trim();
+
+            if (url.isEmpty()) {
+                showToast("Enter a URL");
+                return;
             }
+
+            if (!Patterns.WEB_URL.matcher(url).matches()) {
+                showToast("Invalid URL");
+                return;
+            }
+
+            playVideo(Uri.parse(url));
         });
 
-        btnPlay.setOnClickListener(v -> {
-            if (isVideo) {
-                videoView.start();
-            } else if (mediaPlayer != null) {
-                mediaPlayer.start();
-            }
-        });
+        btnPlay.setOnClickListener(v -> playMedia());
 
-        btnPause.setOnClickListener(v -> {
-            if (isVideo) {
-                videoView.pause();
-            } else if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                mediaPlayer.pause();
-            }
-        });
+        btnPause.setOnClickListener(v -> pauseMedia());
 
-        btnStop.setOnClickListener(v -> {
-            if (isVideo) {
-                videoView.stopPlayback();
-            } else if (mediaPlayer != null) {
-                mediaPlayer.stop();
-                try {
-                    mediaPlayer.prepare();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
+        btnStop.setOnClickListener(v -> stopMedia());
 
-        btnRestart.setOnClickListener(v -> {
-            if (isVideo) {
-                videoView.resume();
-                videoView.seekTo(0);
-                videoView.start();
-            } else if (mediaPlayer != null) {
-                mediaPlayer.seekTo(0);
-                mediaPlayer.start();
-            }
-        });
+        btnRestart.setOnClickListener(v -> restartMedia());
     }
 
-    private void openFilePicker() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("audio/*");
-        startActivityForResult(intent, PICK_AUDIO_REQUEST);
-    }
+    private void handleSelectedFile(Uri uri) {
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PICK_AUDIO_REQUEST && resultCode == RESULT_OK && data != null) {
-            audioUri = data.getData();
-            isVideo = false;
-            playAudio(audioUri);
+        if (uri == null) return;
+
+        String type = getContentResolver().getType(uri);
+
+        if (type != null && type.startsWith("video")) {
+            playVideo(uri);
+        } else {
+            playAudio(uri);
         }
     }
 
     private void playAudio(Uri uri) {
-        if (mediaPlayer != null) {
-            mediaPlayer.release();
-        }
+
+        releaseAudioPlayer();
+
         mediaPlayer = MediaPlayer.create(this, uri);
-        mediaPlayer.start();
-        Toast.makeText(this, "Playing Audio", Toast.LENGTH_SHORT).show();
+
+        if (mediaPlayer != null) {
+            mediaPlayer.start();
+            isVideoPlaying = false;
+            showToast("Playing Audio");
+        }
     }
 
     private void playVideo(Uri uri) {
-        isVideo = true;
+
+        releaseAudioPlayer();
+
+        videoView.setVideoURI(uri);
+        videoView.start();
+
+        isVideoPlaying = true;
+
+        showToast("Playing Video");
+    }
+
+    private void playMedia() {
+
+        if (isVideoPlaying) {
+            videoView.start();
+        } else if (mediaPlayer != null) {
+            mediaPlayer.start();
+        }
+    }
+
+    private void pauseMedia() {
+
+        if (isVideoPlaying) {
+            videoView.pause();
+        } else if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+            mediaPlayer.pause();
+        }
+    }
+
+    private void stopMedia() {
+
+        if (isVideoPlaying) {
+            videoView.stopPlayback();
+        } else {
+            releaseAudioPlayer();
+        }
+    }
+
+    private void restartMedia() {
+
+        if (isVideoPlaying) {
+            videoView.seekTo(0);
+            videoView.start();
+        } else if (mediaPlayer != null) {
+            mediaPlayer.seekTo(0);
+            mediaPlayer.start();
+        }
+    }
+
+    private void releaseAudioPlayer() {
+
         if (mediaPlayer != null) {
-            mediaPlayer.stop();
             mediaPlayer.release();
             mediaPlayer = null;
         }
-        videoView.setVideoURI(uri);
-        videoView.start();
-        Toast.makeText(this, "Streaming Video", Toast.LENGTH_SHORT).show();
     }
 
-    private boolean checkPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        } else {
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
-        }
-    }
-
-    private void requestPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_MEDIA_AUDIO}, PERMISSION_REQUEST_CODE);
-        } else {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, PERMISSION_REQUEST_CODE);
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                openFilePicker();
-            } else {
-                Toast.makeText(this, "Permission Denied", Toast.LENGTH_SHORT).show();
-            }
-        }
+    private void showToast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (mediaPlayer != null) {
-            mediaPlayer.release();
-            mediaPlayer = null;
-        }
+        releaseAudioPlayer();
     }
 }
