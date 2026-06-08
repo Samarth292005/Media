@@ -1,6 +1,5 @@
 package com.example.media;
 
-import android.content.Intent;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
@@ -21,7 +20,7 @@ public class MainActivity extends AppCompatActivity {
     private MediaPlayer mediaPlayer;
     private EditText urlEditText;
 
-    private boolean isVideoPlaying = false;
+    private boolean isVideoMode = false;
 
     private final ActivityResultLauncher<String> filePicker =
             registerForActivityResult(
@@ -63,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
                 filePicker.launch("*/*"));
 
         btnOpenUrl.setOnClickListener(v -> {
+
             String url = urlEditText.getText().toString().trim();
 
             if (url.isEmpty()) {
@@ -89,14 +89,24 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleSelectedFile(Uri uri) {
 
-        if (uri == null) return;
+        if (uri == null) {
+            showToast("No file selected");
+            return;
+        }
 
         String type = getContentResolver().getType(uri);
 
-        if (type != null && type.startsWith("video")) {
+        if (type == null) {
+            showToast("Unsupported file");
+            return;
+        }
+
+        if (type.startsWith("video/")) {
             playVideo(uri);
-        } else {
+        } else if (type.startsWith("audio/")) {
             playAudio(uri);
+        } else {
+            showToast("Please select an audio or video file");
         }
     }
 
@@ -104,12 +114,25 @@ public class MainActivity extends AppCompatActivity {
 
         releaseAudioPlayer();
 
-        mediaPlayer = MediaPlayer.create(this, uri);
+        try {
 
-        if (mediaPlayer != null) {
-            mediaPlayer.start();
-            isVideoPlaying = false;
-            showToast("Playing Audio");
+            mediaPlayer = new MediaPlayer();
+            mediaPlayer.setDataSource(this, uri);
+
+            mediaPlayer.setOnPreparedListener(mp -> {
+                mp.start();
+                showToast("Playing Audio");
+            });
+
+            mediaPlayer.setOnCompletionListener(mp ->
+                    showToast("Audio Finished"));
+
+            mediaPlayer.prepareAsync();
+
+            isVideoMode = false;
+
+        } catch (Exception e) {
+            showToast("Unable to play audio");
         }
     }
 
@@ -118,66 +141,58 @@ public class MainActivity extends AppCompatActivity {
         releaseAudioPlayer();
 
         videoView.setVideoURI(uri);
-        videoView.start();
 
-        isVideoPlaying = true;
+        videoView.setOnPreparedListener(mp -> {
+            videoView.start();
+            showToast("Playing Video");
+        });
 
-        showToast("Playing Video");
+        videoView.setOnCompletionListener(mp ->
+                showToast("Video Finished"));
+
+        isVideoMode = true;
     }
 
     private void playMedia() {
 
-        if (isVideoPlaying) {
-            videoView.start();
-        } else if (mediaPlayer != null) {
-            mediaPlayer.start();
+        try {
+
+            if (isVideoMode) {
+
+                if (!videoView.isPlaying()) {
+                    videoView.start();
+                }
+
+            } else if (mediaPlayer != null) {
+
+                if (!mediaPlayer.isPlaying()) {
+                    mediaPlayer.start();
+                }
+            }
+
+        } catch (Exception e) {
+            showToast("Play failed");
         }
     }
 
     private void pauseMedia() {
 
-        if (isVideoPlaying) {
-            videoView.pause();
-        } else if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
+        try {
+
+            if (isVideoMode) {
+
+                if (videoView.isPlaying()) {
+                    videoView.pause();
+                }
+
+            } else if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+
+                mediaPlayer.pause();
+            }
+
+        } catch (Exception e) {
+            showToast("Pause failed");
         }
     }
 
-    private void stopMedia() {
-
-        if (isVideoPlaying) {
-            videoView.stopPlayback();
-        } else {
-            releaseAudioPlayer();
-        }
-    }
-
-    private void restartMedia() {
-
-        if (isVideoPlaying) {
-            videoView.seekTo(0);
-            videoView.start();
-        } else if (mediaPlayer != null) {
-            mediaPlayer.seekTo(0);
-            mediaPlayer.start();
-        }
-    }
-
-    private void releaseAudioPlayer() {
-
-        if (mediaPlayer != null) {
-            mediaPlayer.release();
-            mediaPlayer = null;
-        }
-    }
-
-    private void showToast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        releaseAudioPlayer();
-    }
-}
+    private
